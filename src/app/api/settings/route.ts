@@ -3,15 +3,15 @@ import { fail, json } from "@/lib/server/http";
 import { getSettings, log, saveSettings } from "@/lib/server/store";
 import type { Settings } from "@/lib/types";
 
-const LIMITS: Record<Exclude<keyof Settings, "autoTrade" | "closeEod" | "includeMovers">, [number, number]> = {
+const LIMITS: Record<Exclude<keyof Settings, "autoTrade" | "closeEod" | "includeMovers" | "holdStyle">, [number, number]> = {
   riskPct: [0.25, 5],
   maxDailyLossPct: [1, 10],
   maxPositions: [1, 5],
   minRR: [1, 5],
   minScore: [50, 95],
   exitScore: [10, 60],
-  dteMin: [1, 30],
-  dteMax: [2, 45],
+  dteMin: [1, 365],
+  dteMax: [2, 730],
   maxPremiumPct: [5, 50],
 };
 
@@ -29,6 +29,7 @@ export async function PUT(request: Request) {
     const current = await getSettings();
     const body = (await request.json().catch(() => ({}))) as Partial<Record<keyof Settings, unknown>>;
     const next: Settings = { ...current };
+    if (body.holdStyle === "day" || body.holdStyle === "swing") next.holdStyle = body.holdStyle;
     for (const key of ["autoTrade", "closeEod", "includeMovers"] as const) {
       if (typeof body[key] === "boolean") next[key] = body[key] as boolean;
     }

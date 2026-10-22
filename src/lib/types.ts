@@ -1,7 +1,10 @@
 import type { Action, Components, Direction } from "./engine";
 
+export type HoldStyle = "day" | "swing";
+
 export interface Settings {
   autoTrade: boolean;
+  holdStyle: HoldStyle;
   riskPct: number;
   maxDailyLossPct: number;
   maxPositions: number;
@@ -18,6 +21,7 @@ export interface Settings {
 export interface TradeRow {
   id: number;
   source: "auto" | "manual";
+  holdStyle: HoldStyle;
   symbol: string;
   direction: Direction;
   optionSymbol: string;
@@ -88,6 +92,7 @@ export interface SymbolSignal {
   components: Components | null;
   option: OptionSetup | null;
   optionReason: string | null;
+  holdStyle?: HoldStyle;
 }
 
 export interface Portfolio {

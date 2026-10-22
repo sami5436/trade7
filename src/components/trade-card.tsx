@@ -5,8 +5,8 @@ import { ChevronDown, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/hooks/use-api";
 import { COMPONENT_LABELS, WEIGHTS, type Component } from "@/lib/engine";
-import { contractLabel, money, price } from "@/lib/format";
-import type { SymbolSignal } from "@/lib/types";
+import { money, orderText, price, strategyName } from "@/lib/format";
+import type { HoldStyle, SymbolSignal } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Card } from "./card";
 import { SignalBadge } from "./signal-badge";
@@ -48,7 +48,17 @@ function Level({ label, value, sub }: { label: string; value: string; sub?: stri
   );
 }
 
-export function TradeCard({ signal, onTraded, canTrade = true }: { signal: SymbolSignal; onTraded?: () => void; canTrade?: boolean }) {
+export function TradeCard({
+  signal,
+  onTraded,
+  canTrade = true,
+  holdStyle = "day",
+}: {
+  signal: SymbolSignal;
+  onTraded?: () => void;
+  canTrade?: boolean;
+  holdStyle?: HoldStyle;
+}) {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const o = signal.option;
@@ -71,15 +81,24 @@ export function TradeCard({ signal, onTraded, canTrade = true }: { signal: Symbo
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-4xl font-extrabold tracking-tight md:text-5xl">{signal.symbol}</div>
-          {o && <div className="mt-1 text-sm font-medium whitespace-pre text-white/60">{contractLabel(o)}</div>}
+          <div className="mt-2 flex flex-wrap gap-2">
+            {o && <Tag strong>{strategyName(o.type)}</Tag>}
+            <Tag>{holdStyle === "swing" ? "SWING HOLD" : "DAY TRADE"}</Tag>
+          </div>
         </div>
         <SignalBadge action={signal.action === "WAIT" ? "WAIT" : signal.action} size="lg" />
       </div>
 
-      <div className="mt-6 grid grid-cols-3 gap-4">
-        <Level label="Entry" value={price(signal.entry)} sub={o ? `Pay ${price(o.ask)}` : undefined} />
-        <Level label="Stop" value={price(signal.stop)} sub={o ? `Opt ${price(o.optionStop)}` : undefined} />
-        <Level label="Target" value={price(signal.target)} sub={o ? `${o.rr.toFixed(1)}x reward` : undefined} />
+      {o ? (
+        <p className="mt-5 rounded-2xl bg-white/[0.04] px-4 py-3 text-sm font-medium text-white/85">{orderText(signal.symbol, o)}</p>
+      ) : (
+        signal.optionReason && <p className="mt-5 text-sm text-white/50">{signal.optionReason}</p>
+      )}
+
+      <div className="mt-5 grid grid-cols-3 gap-4">
+        <Level label={`${signal.symbol} entry`} value={price(signal.entry)} sub={o ? `Pay ${price(o.ask)}` : undefined} />
+        <Level label="Stock stop" value={price(signal.stop)} sub={o ? `Opt ${price(o.optionStop)}` : undefined} />
+        <Level label="Stock target" value={price(signal.target)} sub={o ? `${o.rr.toFixed(1)}x reward` : undefined} />
       </div>
 
       {o && (
@@ -127,5 +146,18 @@ export function TradeCard({ signal, onTraded, canTrade = true }: { signal: Symbo
         </button>
       )}
     </Card>
+  );
+}
+
+function Tag({ children, strong }: { children: React.ReactNode; strong?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider",
+        strong ? "bg-white text-black" : "border border-white/15 text-white/60",
+      )}
+    >
+      {children}
+    </span>
   );
 }

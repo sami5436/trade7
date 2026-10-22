@@ -141,15 +141,18 @@ interface RawBar {
   v: number;
 }
 
-export async function getBars(
-  symbols: string[],
+const BAR_PAGE_CAP = 100;
+const BAR_CONCURRENCY = 6;
+
+async function barsFor(
+  symbol: string,
   opts: { timeframe: "5Min" | "1Day"; start: string; end?: string; feed: "iex" | "sip"; ttlMs?: number },
-): Promise<Record<string, Bar[]>> {
-  const out: Record<string, Bar[]> = Object.fromEntries(symbols.map((s) => [s, []]));
+): Promise<Bar[]> {
+  const out: Bar[] = [];
   let token: string | null = null;
-  for (let page = 0; page < 40; page++) {
+  for (let page = 0; page < BAR_PAGE_CAP; page++) {
     const q = new URLSearchParams({
-      symbols: symbols.join(","),
+      symbols: symbol,
       timeframe: opts.timeframe,
       start: opts.start,
       limit: "10000",
@@ -162,12 +165,26 @@ export async function getBars(
     const res: { bars: Record<string, RawBar[]> | null; next_page_token: string | null } = await request(DATA, `/v2/stocks/bars?${q}`, {
       ttlMs: opts.ttlMs,
     });
-    for (const [sym, bars] of Object.entries(res.bars ?? {})) {
-      for (const b of bars) out[sym]?.push({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v });
-    }
+    for (const b of res.bars?.[symbol] ?? []) out.push({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v });
     token = res.next_page_token;
-    if (!token) break;
+    if (!token) return out;
   }
+  // Never return a silently truncated history.
+  throw new AlpacaError(`Bar history for ${symbol} exceeded ${BAR_PAGE_CAP} pages`, 500);
+}
+
+/** Fetches each symbol separately so one busy symbol cannot crowd others out of shared pages. */
+export async function getBars(
+  symbols: string[],
+  opts: { timeframe: "5Min" | "1Day"; start: string; end?: string; feed: "iex" | "sip"; ttlMs?: number },
+): Promise<Record<string, Bar[]>> {
+  const out: Record<string, Bar[]> = {};
+  const queue = [...symbols];
+  await Promise.all(
+    Array.from({ length: Math.min(BAR_CONCURRENCY, queue.length) }, async () => {
+      for (let sym = queue.shift(); sym; sym = queue.shift()) out[sym] = await barsFor(sym, opts);
+    }),
+  );
   return out;
 }
 

@@ -2,6 +2,7 @@ import type { Settings } from "./types";
 
 /** Tuning defaults. Reset keeps the auto trading switch as it is. */
 export const DEFAULT_SETTINGS: Omit<Settings, "autoTrade"> = {
+  holdStyle: "day",
   riskPct: 1,
   maxDailyLossPct: 3,
   maxPositions: 3,

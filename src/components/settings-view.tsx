@@ -15,15 +15,29 @@ import { Skeleton } from "./ui/skeleton";
 
 type NumKey = "riskPct" | "maxDailyLossPct" | "maxPositions" | "minRR" | "minScore" | "dteMin" | "dteMax" | "maxPremiumPct";
 
-const STEPPERS: { key: NumKey; label: string; step: number; min: number; max: number; unit?: string; hint?: (v: number, eq: number) => string }[] = [
+// Expiry steps grow with the value so LEAP style expirations are a few taps away.
+const dteStep = (v: number, up: boolean) => {
+  const x = up ? v : v - 1;
+  return x >= 90 ? 30 : x >= 21 ? 7 : 1;
+};
+
+const STEPPERS: {
+  key: NumKey;
+  label: string;
+  step: number | ((v: number, up: boolean) => number);
+  min: number;
+  max: number;
+  unit?: string;
+  hint?: (v: number, eq: number) => string;
+}[] = [
   { key: "riskPct", label: "Risk per trade", step: 0.25, min: 0.25, max: 5, unit: "%", hint: (v, eq) => money((eq * v) / 100) },
   { key: "maxDailyLossPct", label: "Max daily loss", step: 0.5, min: 1, max: 10, unit: "%", hint: (v, eq) => money((eq * v) / 100) },
   { key: "maxPositions", label: "Max positions", step: 1, min: 1, max: 5 },
   { key: "minRR", label: "Min reward to risk", step: 0.5, min: 1, max: 5, unit: "x" },
   { key: "minScore", label: "Min confidence", step: 5, min: 50, max: 95 },
   { key: "maxPremiumPct", label: "Max cost per trade", step: 5, min: 5, max: 50, unit: "%", hint: (v, eq) => money((eq * v) / 100) },
-  { key: "dteMin", label: "Min days to expiry", step: 1, min: 1, max: 30 },
-  { key: "dteMax", label: "Max days to expiry", step: 1, min: 2, max: 45 },
+  { key: "dteMin", label: "Min days to expiry", step: dteStep, min: 1, max: 365 },
+  { key: "dteMax", label: "Max days to expiry", step: dteStep, min: 2, max: 730 },
 ];
 
 export function SettingsView() {
@@ -68,6 +82,32 @@ export function SettingsView() {
         <h1 className="text-3xl font-extrabold tracking-tight md:text-4xl">Settings</h1>
 
         <Card>
+          <div className="py-2">
+            <div className="font-semibold">Hold style</div>
+            <div className="text-sm text-white/50">
+              {s.holdStyle === "swing"
+                ? "Holds overnight with daily range stops and targets. Exits only on stop, target or near expiry."
+                : "Intraday trades on 5 minute signals, closed before the bell."}
+            </div>
+            <div className="mt-3 grid grid-cols-2 rounded-full border border-white/15 p-1" role="radiogroup" aria-label="Hold style">
+              {(["day", "swing"] as const).map((h) => (
+                <button
+                  key={h}
+                  type="button"
+                  role="radio"
+                  aria-checked={s.holdStyle === h}
+                  disabled={saving}
+                  onClick={() =>
+                    save(h === "swing" ? { holdStyle: h, dteMin: Math.max(s.dteMin, 14), dteMax: Math.max(s.dteMax, 60) } : { holdStyle: h, dteMin: 3, dteMax: 10 })
+                  }
+                  className={`h-10 rounded-full text-sm font-bold tracking-wider transition ${s.holdStyle === h ? "bg-white text-black" : "text-white/60"}`}
+                >
+                  {h === "day" ? "DAY" : "SWING"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Divider />
           <Row
             title="Auto trading"
             body={s.autoTrade ? "The bot opens and closes paper trades on its own." : "Paused. Stops and targets are still managed."}
@@ -76,7 +116,7 @@ export function SettingsView() {
           <Divider />
           <Row
             title="Exit before the close"
-            body="Flatten everything at 3:50 PM ET."
+            body={s.holdStyle === "swing" ? "Applies to day trades only. Swing holds stay open." : "Flatten everything at 3:50 PM ET."}
             control={<Switch checked={s.closeEod} disabled={saving} onCheckedChange={(v) => save({ closeEod: v })} aria-label="Exit before the close" />}
           />
           <Divider />
@@ -210,7 +250,7 @@ function Stepper(props: {
   value: number;
   unit?: string;
   hint?: string;
-  step: number;
+  step: number | ((v: number, up: boolean) => number);
   min: number;
   max: number;
   disabled: boolean;
@@ -225,14 +265,14 @@ function Stepper(props: {
         {hint && <div className="tabular text-xs text-white/45">{hint}</div>}
       </div>
       <div className="flex items-center gap-2">
-        <button type="button" className={btn} disabled={disabled || value <= min} onClick={() => onChange(+(value - step).toFixed(2))} aria-label={`Decrease ${label}`}>
+        <button type="button" className={btn} disabled={disabled || value <= min} onClick={() => onChange(+(value - (typeof step === "number" ? step : step(value, false))).toFixed(2))} aria-label={`Decrease ${label}`}>
           <Minus className="size-4" />
         </button>
         <span className="tabular w-14 text-center text-base font-semibold">
           {value}
           {unit}
         </span>
-        <button type="button" className={btn} disabled={disabled || value >= max} onClick={() => onChange(+(value + step).toFixed(2))} aria-label={`Increase ${label}`}>
+        <button type="button" className={btn} disabled={disabled || value >= max} onClick={() => onChange(+(value + (typeof step === "number" ? step : step(value, true))).toFixed(2))} aria-label={`Increase ${label}`}>
           <Plus className="size-4" />
         </button>
       </div>

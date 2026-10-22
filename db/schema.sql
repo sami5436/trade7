@@ -126,6 +126,10 @@ create table if not exists backtests (
   trades jsonb not null
 );
 
+
+alter table settings add column if not exists hold_style text not null default 'day';
+alter table trades add column if not exists hold_style text not null default 'day';
+
 insert into settings (id) values (1) on conflict do nothing;
 insert into bot_state (id) values (1) on conflict do nothing;
 insert into accounts (start_balance) select 5000 where not exists (select 1 from accounts);

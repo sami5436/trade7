@@ -98,8 +98,9 @@ export async function closeTrade(t: TradeRow, reason: string): Promise<string> {
 function exitReason(t: TradeRow, sig: SymbolSignal | undefined, settings: Settings, halted: boolean): string | null {
   const now = Date.now();
   const { minutes } = etParts(now);
+  const swing = t.holdStyle === "swing";
   if (halted) return "Daily loss limit";
-  if (settings.closeEod && minutes >= FLAT_AT) return "Market close";
+  if (!swing && settings.closeEod && minutes >= FLAT_AT) return "Market close";
   if (daysBetween(etToday(now), t.expiration) <= 1) return "Expiration";
   if (t.mark != null && t.mark <= t.optionStop) return "Stop";
   const u = sig?.price;
@@ -108,7 +109,8 @@ function exitReason(t: TradeRow, sig: SymbolSignal | undefined, settings: Settin
     if (long ? u <= t.underlyingStop : u >= t.underlyingStop) return "Stop";
     if (long ? u >= t.underlyingTarget : u <= t.underlyingTarget) return "Target";
   }
-  if (sig) {
+  // Swing holds ignore intraday score swings and only exit on levels, the premium stop or expiry.
+  if (sig && !swing) {
     const own = t.direction === "long" ? sig.longScore : sig.shortScore;
     const flipped = t.direction === "long" ? sig.action === "SELL" : sig.action === "BUY";
     if (flipped) return "Signal reversed";
@@ -143,6 +145,7 @@ export async function openTrade(sig: SymbolSignal, account: Account, source: "au
   const trade = await insertTrade({
     accountId: account.id,
     source,
+    holdStyle: sig.holdStyle ?? "day",
     symbol: sig.symbol,
     direction: sig.direction!,
     optionSymbol: o.symbol,

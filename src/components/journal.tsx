@@ -5,7 +5,7 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, useApi } from "@/hooks/use-api";
 import type { BacktestResult, BacktestParams } from "@/lib/backtest";
-import { contractLabel, dateTime, money, pct, price, signedMoney } from "@/lib/format";
+import { contractLabel, dateTime, money, pct, price, signedMoney, strategyName } from "@/lib/format";
 import type { Portfolio, TradeRow } from "@/lib/types";
 import { Card, Empty, SectionTitle, Stat } from "./card";
 import { Confirm } from "./confirm";
@@ -116,6 +116,7 @@ export function Journal() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-bold">{t.symbol}</span>
+                      <span className="text-[10px] font-bold tracking-wider text-white/60">{strategyName(t.optionType)}</span>
                       <span className="text-xs whitespace-pre text-white/50">{contractLabel({ strike: t.strike, type: t.optionType, expiration: t.expiration })}</span>
                     </div>
                     <div className="tabular mt-0.5 text-xs text-white/45">

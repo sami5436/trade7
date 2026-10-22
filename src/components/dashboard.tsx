@@ -75,7 +75,7 @@ export function Dashboard() {
         <section>
           <SectionTitle>Best setup</SectionTitle>
           {best ? (
-            <TradeCard signal={best} onTraded={refresh} canTrade={!held.includes(best.symbol)} />
+            <TradeCard signal={best} onTraded={refresh} canTrade={!held.includes(best.symbol)} holdStyle={state.settings.holdStyle} />
           ) : (
             <Empty
               title="No setup qualifies"

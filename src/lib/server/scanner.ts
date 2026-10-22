@@ -2,7 +2,7 @@ import "server-only";
 import { buildSeries, dailyAtr, decide, lastClosedIndex, scoreAt, trendAt, BAR_MS, type Series } from "@/lib/engine";
 import { chooseContract } from "@/lib/options";
 import { addDays, etParts, etToday, formatMinutes } from "@/lib/time";
-import type { DailyBar } from "@/lib/engine";
+import type { DailyBar, Plan } from "@/lib/engine";
 import type { OptionSetup, ScanSummary, Settings, SymbolSignal } from "@/lib/types";
 import { getAsset, getBars, getClock, getDailyBars, getMostActive, getOptionChain, getSnapshots, type Clock, type StockSnapshot } from "./alpaca";
 import { num, numOrNull, sql } from "./db";
@@ -74,6 +74,15 @@ export interface ScanResult extends ScanSummary {
   data: MarketData;
 }
 
+const SWING_STOP_DAILY_ATR = 1.5;
+
+export function swingPlan(plan: Plan, dAtr: number, minRR: number): Plan {
+  const rr = Math.max(minRR, 2);
+  const risk = SWING_STOP_DAILY_ATR * dAtr;
+  const sign = plan.direction === "long" ? 1 : -1;
+  return { ...plan, stop: plan.entry - sign * risk, target: plan.entry + sign * risk * rr, rr };
+}
+
 function gateFor(clock: Clock, now: number, barTime: number | null): string | null {
   if (!clock.is_open) {
     const next = new Date(clock.next_open);
@@ -107,11 +116,19 @@ export async function scan(opts: ScanOptions, data?: MarketData): Promise<ScanRe
     const freshTrade = snap && d.clock.is_open && now - snap.tradeTime < 5 * 60_000;
     const price = freshTrade ? snap.price : (bar?.c ?? snap?.price ?? null);
     const gate = gateFor(d.clock, now, liveSession ? bar!.t : null);
-    const result =
-      bar && price != null
-        ? scoreAt({ s, i, price, dailyAtr: dailyAtr(d.daily[sym] ?? [], s.session[i]), spy: trendAt(spy, bar.t), qqq: trendAt(qqq, bar.t) })
-        : null;
-    const signal = decide(result, { minScore: opts.settings.minScore, minRR: opts.settings.minRR }, gate);
+    const dAtr = bar ? dailyAtr(d.daily[sym] ?? [], s.session[i]) : null;
+    const result = bar && price != null ? scoreAt({ s, i, price, dailyAtr: dAtr, spy: trendAt(spy, bar.t), qqq: trendAt(qqq, bar.t) }) : null;
+    const swing = opts.settings.holdStyle === "swing";
+    // Swing holds keep the intraday entry score but replace the levels with daily range levels.
+    const signal = decide(result, { minScore: opts.settings.minScore, minRR: swing ? 0 : opts.settings.minRR }, gate);
+    if (swing && signal.plan) {
+      if (dAtr == null) {
+        signal.action = "WAIT";
+        signal.reason = "Not enough daily history for a swing plan.";
+      } else {
+        signal.plan = swingPlan(signal.plan, dAtr, opts.settings.minRR);
+      }
+    }
     const isCore = CORE.includes(sym);
     if (!isCore && signal.action === "WAIT") continue;
     signals.push({
@@ -132,6 +149,7 @@ export async function scan(opts: ScanOptions, data?: MarketData): Promise<ScanRe
       components: signal.components,
       option: null,
       optionReason: null,
+      holdStyle: opts.settings.holdStyle,
     });
   }
 

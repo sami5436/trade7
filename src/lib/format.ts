@@ -43,3 +43,15 @@ export function dateTime(iso: string | null): string {
 export function contractLabel(o: { strike: number; type: "call" | "put"; expiration: string }): string {
   return `$${o.strike % 1 === 0 ? o.strike.toFixed(0) : o.strike.toFixed(2)} ${o.type.toUpperCase()}  ${shortDate(o.expiration)}`;
 }
+
+export function strategyName(type: "call" | "put"): string {
+  return type === "call" ? "LONG CALL" : "LONG PUT";
+}
+
+/** Plain order description, for example "Buy to open 2 NVDA $220 calls, expiring Oct 28 (7 days)". */
+export function orderText(symbol: string, o: { contracts: number; strike: number; type: "call" | "put"; expiration: string; dte?: number }): string {
+  const strike = o.strike % 1 === 0 ? o.strike.toFixed(0) : o.strike.toFixed(2);
+  const kind = o.contracts === 1 ? o.type : `${o.type}s`;
+  const days = o.dte != null ? ` (${o.dte} ${o.dte === 1 ? "day" : "days"})` : "";
+  return `Buy to open ${o.contracts} ${symbol} $${strike} ${kind}, expiring ${shortDate(o.expiration)}${days}`;
+}

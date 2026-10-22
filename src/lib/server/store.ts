@@ -8,6 +8,7 @@ export async function getSettings(): Promise<Settings> {
   const [r] = await sql()`select * from settings where id = 1`;
   return {
     autoTrade: r.auto_trade,
+    holdStyle: r.hold_style === "swing" ? "swing" : "day",
     riskPct: num(r.risk_pct),
     maxDailyLossPct: num(r.max_daily_loss_pct),
     maxPositions: r.max_positions,
@@ -25,7 +26,7 @@ export async function getSettings(): Promise<Settings> {
 export async function saveSettings(s: Settings) {
   await sql()`
     update settings set
-      auto_trade = ${s.autoTrade}, risk_pct = ${s.riskPct}, max_daily_loss_pct = ${s.maxDailyLossPct},
+      auto_trade = ${s.autoTrade}, hold_style = ${s.holdStyle}, risk_pct = ${s.riskPct}, max_daily_loss_pct = ${s.maxDailyLossPct},
       max_positions = ${s.maxPositions}, min_rr = ${s.minRR}, min_score = ${s.minScore}, exit_score = ${s.exitScore},
       dte_min = ${s.dteMin}, dte_max = ${s.dteMax}, max_premium_pct = ${s.maxPremiumPct},
       close_eod = ${s.closeEod}, include_movers = ${s.includeMovers}, updated_at = now()
@@ -55,6 +56,7 @@ function toTrade(r: Record<string, unknown>): TradeRow {
   return {
     id: r.id as number,
     source: r.source as TradeRow["source"],
+    holdStyle: r.hold_style === "swing" ? "swing" : "day",
     symbol: r.symbol as string,
     direction: r.direction as TradeRow["direction"],
     optionSymbol: r.option_symbol as string,
@@ -98,10 +100,10 @@ export async function listTrades(accountId: number, statuses?: TradeRow["status"
 
 export async function insertTrade(t: Omit<TradeRow, "id" | "createdAt" | "openedAt" | "closedAt" | "exitPrice" | "exitOrderId" | "exitReason" | "realizedPnl" | "markAt"> & { accountId: number }) {
   const [r] = await sql()`
-    insert into trades (account_id, source, symbol, direction, option_symbol, option_type, strike, expiration, qty, status,
+    insert into trades (account_id, source, hold_style, symbol, direction, option_symbol, option_type, strike, expiration, qty, status,
       entry_order_id, entry_limit, entry_price, underlying_entry, underlying_stop, underlying_target, option_stop,
       planned_risk, planned_reward, planned_rr, score, reason, fees, mark, delta)
-    values (${t.accountId}, ${t.source}, ${t.symbol}, ${t.direction}, ${t.optionSymbol}, ${t.optionType}, ${t.strike},
+    values (${t.accountId}, ${t.source}, ${t.holdStyle}, ${t.symbol}, ${t.direction}, ${t.optionSymbol}, ${t.optionType}, ${t.strike},
       ${t.expiration}, ${t.qty}, ${t.status}, ${t.entryOrderId}, ${t.entryLimit}, ${t.entryPrice}, ${t.underlyingEntry},
       ${t.underlyingStop}, ${t.underlyingTarget}, ${t.optionStop}, ${t.plannedRisk}, ${t.plannedReward}, ${t.plannedRR},
       ${t.score}, ${t.reason}, ${t.fees}, ${t.mark}, ${t.delta})

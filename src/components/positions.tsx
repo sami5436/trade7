@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/hooks/use-api";
-import { contractLabel, price, signedMoney } from "@/lib/format";
+import { contractLabel, price, signedMoney, strategyName } from "@/lib/format";
 import type { TradeRow } from "@/lib/types";
 import { Empty } from "./card";
 
@@ -40,7 +40,9 @@ export function Positions({ positions, onChange }: { positions: TradeRow[]; onCh
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="text-lg font-bold">{t.symbol}</span>
+                <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold tracking-wider text-black">{strategyName(t.optionType)}</span>
                 <span className="text-xs font-semibold text-white/50">{t.qty}x</span>
+                {t.holdStyle === "swing" && <span className="text-[10px] font-bold tracking-wider text-white/50">SWING</span>}
                 {t.status !== "open" && (
                   <span className="rounded-full border border-white/15 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-white/60">
                     {t.status === "pending" ? "FILLING" : "EXITING"}
@@ -49,7 +51,7 @@ export function Positions({ positions, onChange }: { positions: TradeRow[]; onCh
               </div>
               <div className="truncate text-xs whitespace-pre text-white/50">{contractLabel({ strike: t.strike, type: t.optionType, expiration: t.expiration })}</div>
               <div className="tabular mt-1 text-xs text-white/40">
-                In {price(t.entryPrice ?? t.entryLimit)} Now {price(t.mark)} Stop {price(t.underlyingStop)} Target {price(t.underlyingTarget)}
+                Paid {price(t.entryPrice ?? t.entryLimit)} Now {price(t.mark)}  {t.symbol} stop {price(t.underlyingStop)} target {price(t.underlyingTarget)}
               </div>
             </div>
             <div className="text-right">
