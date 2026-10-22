@@ -144,7 +144,7 @@ function ChartPanel({ symbol }: { symbol: string }) {
           </div>
           <p className="mt-4 text-sm text-white/80">{s.reason}</p>
           <div className="mt-5 border-t border-white/10 pt-5">
-            <ScoreDetail components={s.components} />
+            <ScoreDetail signal={s} />
           </div>
         </Card>
       )}

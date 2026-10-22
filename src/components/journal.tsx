@@ -156,8 +156,11 @@ export function Journal() {
           Backtest
         </SectionTitle>
         <p className="text-sm text-white/50">
-          Historical simulation, not live results. Same signals on 5 minute bars for the watchlist, traded as shares, filled at the next bar open with{" "}
-          {bt ? bt.params.slippageBps : 5} bps slippage per side.
+          Historical simulation, not live results.{" "}
+          {bt && (bt.params as { mode?: string }).mode === "swing"
+            ? "Swing signals on daily bars over about 400 days, traded as shares, entered at the next open"
+            : "Day signals on 5 minute bars over about 90 days, traded as shares, filled at the next bar open"}{" "}
+          with {bt ? bt.params.slippageBps : 5} bps slippage per side. Option results differ.
         </p>
         {bt ? (
           <>
@@ -175,7 +178,7 @@ export function Journal() {
               </div>
             )}
             <div className="mt-3 text-xs text-white/35">
-              {bt.summary.from} to {bt.summary.to}. Ran {dateTime(bt.createdAt)}. Option results differ from share results.
+              {bt.summary.from} to {bt.summary.to}. Ran {dateTime(bt.createdAt)}.
             </div>
           </>
         ) : (

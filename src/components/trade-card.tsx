@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/hooks/use-api";
-import { COMPONENT_LABELS, WEIGHTS, type Component } from "@/lib/engine";
+import { COMPONENT_LABELS, SWING_LABELS, SWING_WEIGHTS, WEIGHTS } from "@/lib/engine";
 import { money, orderText, price, strategyName } from "@/lib/format";
 import type { HoldStyle, SymbolSignal } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -19,18 +19,34 @@ export function ScoreBar({ score }: { score: number }) {
   );
 }
 
-export function ScoreDetail({ components }: { components: SymbolSignal["components"] }) {
-  if (!components) return null;
+export function ScoreDetail({ signal }: { signal: SymbolSignal }) {
+  // Swing signals score daily trend factors; day signals score the intraday components.
+  const rows = signal.swingComponents
+    ? (Object.keys(SWING_WEIGHTS) as (keyof typeof SWING_WEIGHTS)[]).map((k) => ({
+        key: k,
+        label: SWING_LABELS[k],
+        value: signal.swingComponents![k],
+        max: SWING_WEIGHTS[k] as number,
+      }))
+    : signal.components
+      ? (Object.keys(WEIGHTS) as (keyof typeof WEIGHTS)[]).map((k) => ({
+          key: k,
+          label: COMPONENT_LABELS[k],
+          value: signal.components![k],
+          max: WEIGHTS[k] as number,
+        }))
+      : [];
+  if (rows.length === 0) return null;
   return (
     <div className="grid gap-2.5">
-      {(Object.keys(WEIGHTS) as Component[]).map((k) => (
-        <div key={k} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 text-xs">
-          <span className="text-white/60">{COMPONENT_LABELS[k]}</span>
+      {rows.map((r) => (
+        <div key={r.key} className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 text-xs">
+          <span className="text-white/60">{r.label}</span>
           <span className="tabular text-white/80">
-            {components[k]}/{WEIGHTS[k]}
+            {r.value}/{r.max}
           </span>
           <div className="col-span-2 h-1 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full bg-white/80" style={{ width: `${(components[k] / WEIGHTS[k]) * 100}%` }} />
+            <div className="h-full bg-white/80" style={{ width: `${(r.value / r.max) * 100}%` }} />
           </div>
         </div>
       ))}
@@ -129,7 +145,7 @@ export function TradeCard({
         </button>
         {open && (
           <div className="mt-3">
-            <ScoreDetail components={signal.components} />
+            <ScoreDetail signal={signal} />
           </div>
         )}
       </div>

@@ -15,6 +15,9 @@ import { Skeleton } from "./ui/skeleton";
 
 type NumKey = "riskPct" | "maxDailyLossPct" | "maxPositions" | "minRR" | "minScore" | "dteMin" | "dteMax" | "maxPremiumPct";
 
+// Swing entries follow the tested daily rule, so these day trading thresholds do not apply.
+const SWING_UNUSED: NumKey[] = ["minScore", "minRR", "maxDailyLossPct"];
+
 // Expiry steps grow with the value so LEAP style expirations are a few taps away.
 const dteStep = (v: number, up: boolean) => {
   const x = up ? v : v - 1;
@@ -86,8 +89,8 @@ export function SettingsView() {
             <div className="font-semibold">Hold style</div>
             <div className="text-sm text-white/50">
               {s.holdStyle === "swing"
-                ? "Holds overnight with daily range stops and targets. Exits only on stop, target or near expiry."
-                : "Intraday trades on 5 minute signals, closed before the bell."}
+                ? "Recommended. Long calls only. Daily trend entries 9:35 to 10:30 AM ET, held up to 5 sessions."
+                : "Intraday 5 minute signals, closed before the bell. Lost money in every backtest window."}
             </div>
             <div className="mt-3 grid grid-cols-2 rounded-full border border-white/15 p-1" role="radiogroup" aria-label="Hold style">
               {(["day", "swing"] as const).map((h) => (
@@ -150,6 +153,7 @@ export function SettingsView() {
               <Stepper
                 key={st.key}
                 label={st.label}
+                note={s.holdStyle === "swing" && SWING_UNUSED.includes(st.key) ? "Not used in swing" : undefined}
                 value={s[st.key]}
                 unit={st.unit}
                 hint={st.hint?.(s[st.key], equity)}
@@ -250,19 +254,20 @@ function Stepper(props: {
   value: number;
   unit?: string;
   hint?: string;
+  note?: string;
   step: number | ((v: number, up: boolean) => number);
   min: number;
   max: number;
   disabled: boolean;
   onChange: (v: number) => void;
 }) {
-  const { label, value, unit, hint, step, min, max, disabled, onChange } = props;
+  const { label, value, unit, hint, note, step, min, max, disabled, onChange } = props;
   const btn = "flex size-11 items-center justify-center rounded-full border border-white/15 transition hover:bg-white hover:text-black disabled:opacity-30";
   return (
-    <div className="flex items-center justify-between gap-3 py-2">
+    <div className={`flex items-center justify-between gap-3 py-2 ${note ? "opacity-40" : ""}`}>
       <div className="min-w-0">
         <div className="text-sm font-medium">{label}</div>
-        {hint && <div className="tabular text-xs text-white/45">{hint}</div>}
+        {(note ?? hint) && <div className="tabular text-xs text-white/45">{note ?? hint}</div>}
       </div>
       <div className="flex items-center gap-2">
         <button type="button" className={btn} disabled={disabled || value <= min} onClick={() => onChange(+(value - (typeof step === "number" ? step : step(value, false))).toFixed(2))} aria-label={`Decrease ${label}`}>
