@@ -230,22 +230,29 @@ function clamp(x: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, x));
 }
 
+// Stops sit beyond the nearest support or resistance but never inside normal 5 minute noise.
+// Targets use the opening range as a measured move, bounded so a wide open cannot inflate reward to risk.
+const MIN_STOP_ATR = 1;
+const MAX_STOP_ATR = 2.5;
+const MIN_TARGET_ATR = 2;
+const MAX_TARGET_ATR = 4;
+
 function planFor(direction: Direction, m: Metrics, dayHigh: number, dayLow: number, dAtr: number | null): Plan {
   const { price, atr: a } = m;
   const range = m.orHigh - m.orLow;
   if (direction === "long") {
     const supports = [m.vwap, m.ema21, price > m.orHigh ? m.orHigh : -Infinity].filter((x) => x < price);
     const base = supports.length ? Math.max(...supports) - 0.25 * a : price - 1.5 * a;
-    const dist = clamp(price - base, 0.75 * a, 2.5 * a);
-    const raw = price + Math.max(range, 2.5 * a);
+    const dist = clamp(price - base, MIN_STOP_ATR * a, MAX_STOP_ATR * a);
+    const raw = price + clamp(range, MIN_TARGET_ATR * a, MAX_TARGET_ATR * a);
     const cap = dAtr != null ? Math.min(dayLow, price) + 1.2 * dAtr : Infinity;
     const target = Math.min(raw, cap);
     return { direction, entry: price, stop: price - dist, target, rr: target > price ? (target - price) / dist : 0 };
   }
   const resistances = [m.vwap, m.ema21, price < m.orLow ? m.orLow : Infinity].filter((x) => x > price);
   const base = resistances.length ? Math.min(...resistances) + 0.25 * a : price + 1.5 * a;
-  const dist = clamp(base - price, 0.75 * a, 2.5 * a);
-  const raw = price - Math.max(range, 2.5 * a);
+  const dist = clamp(base - price, MIN_STOP_ATR * a, MAX_STOP_ATR * a);
+  const raw = price - clamp(range, MIN_TARGET_ATR * a, MAX_TARGET_ATR * a);
   const cap = dAtr != null ? Math.max(dayHigh, price) - 1.2 * dAtr : -Infinity;
   const target = Math.max(raw, cap);
   return { direction, entry: price, stop: price + dist, target, rr: target < price ? (price - target) / dist : 0 };

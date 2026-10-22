@@ -19,12 +19,11 @@ const TICK_MS = 60_000;
 export function StateProvider({ children }: { children: React.ReactNode }) {
   const { data, error, loading, refresh } = useApi<AppState>("/api/state", POLL_MS);
   const configured = data?.configured.data ?? false;
-  const marketOpen = data?.clock?.isOpen ?? false;
   const ticking = useRef(false);
 
-  // While the app is open during market hours it also drives the bot, about once a minute.
+  // While the app is open it also drives the bot. The server throttles how often a pass actually runs.
   useEffect(() => {
-    if (!configured || !marketOpen) return;
+    if (!configured) return;
     const run = async () => {
       if (ticking.current || document.visibilityState !== "visible") return;
       ticking.current = true;
@@ -40,7 +39,7 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
     run();
     const id = setInterval(run, TICK_MS);
     return () => clearInterval(id);
-  }, [configured, marketOpen, refresh]);
+  }, [configured, refresh]);
 
   return <StateContext.Provider value={{ state: data, error, loading, refresh }}>{children}</StateContext.Provider>;
 }
