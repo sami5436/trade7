@@ -1,4 +1,4 @@
-import type { Action, Components, Direction } from "./engine";
+import type { Action, Components, Direction, SwingComponent } from "./engine";
 
 export type HoldStyle = "day" | "swing";
 
@@ -90,6 +90,8 @@ export interface SymbolSignal {
   rr: number | null;
   reason: string;
   components: Components | null;
+  /** Score breakdown for swing mode signals (keys of SWING_WEIGHTS). */
+  swingComponents?: Record<SwingComponent, number> | null;
   option: OptionSetup | null;
   optionReason: string | null;
   holdStyle?: HoldStyle;

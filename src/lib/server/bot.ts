@@ -1,6 +1,7 @@
 import "server-only";
 import { FEE_PER_CONTRACT, round2 } from "@/lib/options";
-import { daysBetween, etParts, etToday } from "@/lib/time";
+import { addDays, daysBetween, etParts, etToday } from "@/lib/time";
+import { SWING_MAX_SESSIONS } from "@/lib/engine";
 import type { Settings, SymbolSignal, TradeRow } from "@/lib/types";
 import { AlpacaError, alpacaConfigured, cancelOrder, getOptionQuotes, getOrder, getPositions, submitOptionOrder, type AlpacaOrder } from "./alpaca";
 import { computePortfolio } from "./portfolio";
@@ -31,6 +32,18 @@ const FLAT_AT = 15 * 60 + 50;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
 const COOLDOWN_MIN = 30;
 const ACTIVE: TradeRow["status"][] = ["pending", "open", "closing"];
+
+/** Weekday sessions from the entry date through today, inclusive. Market holidays count, which only shortens holds. */
+function sessionsHeld(openedAt: string, now: number): number {
+  const from = etParts(Date.parse(openedAt)).date;
+  const to = etToday(now);
+  let n = 0;
+  for (let day = from; day <= to; day = addDays(day, 1)) {
+    const wd = new Date(`${day}T12:00:00Z`).getUTCDay();
+    if (wd !== 0 && wd !== 6) n++;
+  }
+  return n;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -101,6 +114,8 @@ function exitReason(t: TradeRow, sig: SymbolSignal | undefined, settings: Settin
   const swing = t.holdStyle === "swing";
   if (halted) return "Daily loss limit";
   if (!swing && settings.closeEod && minutes >= FLAT_AT) return "Market close";
+  // Swing trades leave at the close of their last allowed session, matching the backtest.
+  if (swing && t.openedAt && minutes >= FLAT_AT && sessionsHeld(t.openedAt, now) >= SWING_MAX_SESSIONS) return "Time exit";
   if (daysBetween(etToday(now), t.expiration) <= 1) return "Expiration";
   if (t.mark != null && t.mark <= t.optionStop) return "Stop";
   const u = sig?.price;
@@ -247,7 +262,8 @@ export async function tick(trigger: string, minGapSeconds = 0): Promise<TickResu
 
       pf = await computePortfolio(account);
       const active = await listTrades(account.id, ACTIVE);
-      const cooled = await recentlyClosed(account.id, COOLDOWN_MIN);
+      // Swing signals stay valid all day, so a closed swing name waits for the next session.
+      const cooled = await recentlyClosed(account.id, settings.holdStyle === "swing" ? 18 * 60 : COOLDOWN_MIN);
       msg = result.best ? `Best: ${result.best.symbol} ${result.best.action} ${result.best.score}` : (result.message ?? "No setup qualifies.");
 
       if (settings.autoTrade && !halted) {

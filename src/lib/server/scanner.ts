@@ -1,5 +1,5 @@
 import "server-only";
-import { buildSeries, dailyAtr, decide, lastClosedIndex, scoreAt, trendAt, BAR_MS, type Series } from "@/lib/engine";
+import { buildSeries, dailyAtr, decide, lastClosedIndex, scoreAt, swingTrendSignal, trendAt, BAR_MS, type Series } from "@/lib/engine";
 import { chooseContract } from "@/lib/options";
 import { addDays, etParts, etToday, formatMinutes } from "@/lib/time";
 import type { DailyBar, Plan } from "@/lib/engine";
@@ -54,7 +54,8 @@ export async function loadMarketData(includeMovers: boolean): Promise<MarketData
   const [bars, daily, snapshots] = await Promise.all([
     getBars(symbols, { timeframe: "5Min", start: `${addDays(today, -16)}T00:00:00Z`, feed: "iex", ttlMs: 20_000 }),
     // Consolidated daily history is free once it is older than 15 minutes, and only prior sessions are used.
-    getDailyBars(symbols, `${addDays(today, -45)}T00:00:00Z`, "sip").catch(() => getDailyBars(symbols, `${addDays(today, -45)}T00:00:00Z`, "iex")),
+    // About 100 sessions so the daily EMA 50 and ADX used by swing mode are settled.
+    getDailyBars(symbols, `${addDays(today, -150)}T00:00:00Z`, "sip").catch(() => getDailyBars(symbols, `${addDays(today, -150)}T00:00:00Z`, "iex")),
     getSnapshots(symbols),
   ]);
   const series: Record<string, Series> = {};
@@ -74,13 +75,15 @@ export interface ScanResult extends ScanSummary {
   data: MarketData;
 }
 
-const SWING_STOP_DAILY_ATR = 1.5;
+// Swing entries mirror the backtest, which fills at the session open after a daily signal.
+const SWING_ENTRY_FROM = 9 * 60 + 35;
+const SWING_ENTRY_UNTIL = 10 * 60 + 30;
 
-export function swingPlan(plan: Plan, dAtr: number, minRR: number): Plan {
-  const rr = Math.max(minRR, 2);
-  const risk = SWING_STOP_DAILY_ATR * dAtr;
-  const sign = plan.direction === "long" ? 1 : -1;
-  return { ...plan, stop: plan.entry - sign * risk, target: plan.entry + sign * risk * rr, rr };
+function swingGate(clock: Clock, now: number): string | null {
+  if (!clock.is_open) return gateFor(clock, now, null);
+  const { minutes } = etParts(now);
+  if (minutes < SWING_ENTRY_FROM || minutes > SWING_ENTRY_UNTIL) return "Swing entries happen 9:35 to 10:30 AM ET.";
+  return null;
 }
 
 function gateFor(clock: Clock, now: number, barTime: number | null): string | null {
@@ -95,6 +98,29 @@ function gateFor(clock: Clock, now: number, barTime: number | null): string | nu
   if (minutes < ENTRY_FROM) return "Opening range forms until 9:45 AM ET.";
   if (minutes > ENTRY_UNTIL) return "Too close to the close for new trades.";
   return null;
+}
+
+/** Daily swing trend signal from completed sessions, with levels re-anchored to the live price. */
+function swingSignalFor(sym: string, d: MarketData, today: string, price: number | null, gate: string | null) {
+  const completed = (d.daily[sym] ?? []).filter((x) => x.date < today);
+  const qqq = (d.daily.QQQ ?? []).filter((x) => x.date < today);
+  const sig = swingTrendSignal(completed, qqq);
+  let plan: Plan | null = null;
+  if (sig.plan && price != null) {
+    const risk = sig.plan.entry - sig.plan.stop;
+    const reward = sig.plan.target - sig.plan.entry;
+    plan = { direction: "long", entry: price, stop: price - risk, target: price + reward, rr: sig.plan.rr };
+  }
+  const buy = sig.action === "BUY" && plan != null && gate == null;
+  return {
+    action: buy ? ("BUY" as const) : ("WAIT" as const),
+    direction: "long" as const,
+    score: sig.score,
+    plan,
+    components: null,
+    swingComponents: sig.components,
+    reason: sig.action === "BUY" && gate ? `${sig.reason} ${gate}` : sig.reason,
+  };
 }
 
 export async function scan(opts: ScanOptions, data?: MarketData): Promise<ScanResult> {
@@ -119,16 +145,9 @@ export async function scan(opts: ScanOptions, data?: MarketData): Promise<ScanRe
     const dAtr = bar ? dailyAtr(d.daily[sym] ?? [], s.session[i]) : null;
     const result = bar && price != null ? scoreAt({ s, i, price, dailyAtr: dAtr, spy: trendAt(spy, bar.t), qqq: trendAt(qqq, bar.t) }) : null;
     const swing = opts.settings.holdStyle === "swing";
-    // Swing holds keep the intraday entry score but replace the levels with daily range levels.
-    const signal = decide(result, { minScore: opts.settings.minScore, minRR: swing ? 0 : opts.settings.minRR }, gate);
-    if (swing && signal.plan) {
-      if (dAtr == null) {
-        signal.action = "WAIT";
-        signal.reason = "Not enough daily history for a swing plan.";
-      } else {
-        signal.plan = swingPlan(signal.plan, dAtr, opts.settings.minRR);
-      }
-    }
+    const signal = swing
+      ? swingSignalFor(sym, d, today, price, swingGate(d.clock, now))
+      : { ...decide(result, { minScore: opts.settings.minScore, minRR: opts.settings.minRR }, gate), swingComponents: null };
     const isCore = CORE.includes(sym);
     if (!isCore && signal.action === "WAIT") continue;
     signals.push({
@@ -139,14 +158,15 @@ export async function scan(opts: ScanOptions, data?: MarketData): Promise<ScanRe
       action: signal.action,
       direction: signal.direction,
       score: signal.score,
-      longScore: result?.long.score ?? 0,
-      shortScore: result?.short.score ?? 0,
+      longScore: swing ? signal.score : (result?.long.score ?? 0),
+      shortScore: swing ? 0 : (result?.short.score ?? 0),
       entry: signal.plan?.entry ?? null,
       stop: signal.plan?.stop ?? null,
       target: signal.plan?.target ?? null,
       rr: signal.plan?.rr ?? null,
       reason: signal.reason,
       components: signal.components,
+      swingComponents: signal.swingComponents,
       option: null,
       optionReason: null,
       holdStyle: opts.settings.holdStyle,
@@ -246,7 +266,7 @@ export async function saveScan(result: ScanResult, trigger: string): Promise<num
         target: s.target,
         rr: s.rr,
         reason: s.reason,
-        components: { ...s.components, _long: s.longScore, _short: s.shortScore },
+        components: { ...s.components, _long: s.longScore, _short: s.shortScore, ...(s.swingComponents ? { _swing: s.swingComponents } : {}) },
         option: s.option ? s.option : s.optionReason ? { reason: s.optionReason } : null,
       })),
     );
@@ -263,9 +283,9 @@ export async function latestScan(): Promise<ScanSummary & { dataAsOf: string | n
   if (!scanRow) return { id: null, at: null, marketOpen: false, message: null, signals: [], best: null, dataAsOf: null };
   const rows = await sql()`select * from signals where scan_id = ${scanRow.id} order by is_core desc, score desc`;
   const signals: SymbolSignal[] = rows.map((r) => {
-    const comps = (r.components ?? null) as Record<string, number> | null;
+    const comps = (r.components ?? null) as (Record<string, number> & { _swing?: SymbolSignal["swingComponents"] }) | null;
     const opt = r.option as (OptionSetup & { reason?: string }) | null;
-    const { _long, _short, ...components } = comps ?? {};
+    const { _long, _short, _swing, ...components } = comps ?? {};
     return {
       symbol: r.symbol,
       isCore: r.is_core,
@@ -282,6 +302,7 @@ export async function latestScan(): Promise<ScanSummary & { dataAsOf: string | n
       rr: numOrNull(r.rr),
       reason: r.reason,
       components: comps && Object.keys(components).length ? (components as SymbolSignal["components"]) : null,
+      swingComponents: _swing ?? null,
       option: opt && "symbol" in opt ? opt : null,
       optionReason: opt?.reason ?? null,
     };

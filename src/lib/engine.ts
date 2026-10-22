@@ -1,3 +1,4 @@
+import { adx } from "./features";
 import { atr, ema, macd, rsi, type Bar, type Num } from "./indicators";
 import { etParts, isRegularSession } from "./time";
 
@@ -401,4 +402,85 @@ export function lastClosedIndex(s: Series, now: number): number {
     if (s.bars[i].t + BAR_MS <= now) return i;
   }
   return -1;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Swing trend mode (daily bars, long only).
+ * Walk-forward tested on 2025-05 to 2026-07 and a 2026-07 to 2026-10 holdout (scripts/optimize.mts).
+ * Decide on the last COMPLETED daily bar, enter at the next open, exit on stop, target or after
+ * SWING_MAX_SESSIONS sessions.
+ * ------------------------------------------------------------------------------------------- */
+
+export const SWING_WEIGHTS = { trend: 30, adx: 25, breakout: 20, strength: 15, reward: 10 } as const;
+export type SwingComponent = keyof typeof SWING_WEIGHTS;
+export const SWING_LABELS: Record<SwingComponent, string> = {
+  trend: "Daily EMA 20/50 trend",
+  adx: "ADX trend strength",
+  breakout: "20 day high",
+  strength: "Strength vs QQQ",
+  reward: "Reward to risk",
+};
+export const SWING_STOP_ATR = 1.5;
+export const SWING_TARGET_ATR = 3;
+export const SWING_MAX_SESSIONS = 5;
+
+export interface SwingSignal {
+  action: "BUY" | "WAIT";
+  score: number;
+  components: Record<SwingComponent, number>;
+  plan: Plan | null;
+  reason: string;
+}
+
+/**
+ * Evaluates the long only swing setup on completed daily bars (ascending, last element = latest
+ * completed session). `qqq` must cover the same dates. Entry needs ALL of: EMA20 > EMA50 and close
+ * above EMA20; ADX above 25 with +DI above -DI; and a close at a 20 day high or a 20 day return at
+ * least 5 points better than QQQ.
+ */
+export function swingTrendSignal(daily: DailyBar[], qqq: DailyBar[]): SwingSignal {
+  const zero: Record<SwingComponent, number> = { trend: 0, adx: 0, breakout: 0, strength: 0, reward: 0 };
+  const k = daily.length - 1;
+  if (k < 60) return { action: "WAIT", score: 0, components: zero, plan: null, reason: "Not enough daily history yet." };
+  const closes = daily.map((d) => d.c);
+  const e20 = ema(closes, 20)[k];
+  const e50 = ema(closes, 50)[k];
+  const dx = adx(daily.map((d) => ({ t: 0, o: d.o, h: d.h, l: d.l, c: d.c, v: 0 })));
+  const a = atr(daily.map((d) => ({ t: 0, o: d.o, h: d.h, l: d.l, c: d.c, v: 0 })), 14)[k];
+  const A = dx.adx[k];
+  const pdi = dx.plusDI[k];
+  const mdi = dx.minusDI[k];
+  if (e20 == null || e50 == null || a == null || A == null || pdi == null || mdi == null) {
+    return { action: "WAIT", score: 0, components: zero, plan: null, reason: "Not enough daily history yet." };
+  }
+  const c = closes[k];
+  let high20 = -Infinity;
+  for (let j = k - 20; j < k; j++) high20 = Math.max(high20, daily[j].h);
+  const qi = qqq.findIndex((q) => q.date === daily[k].date);
+  const qRet = qi >= 20 ? qqq[qi].c / qqq[qi - 20].c - 1 : null;
+  const rs = qRet != null ? c / closes[k - 20] - 1 - qRet : null;
+
+  const trendOk = e20 > e50 && c > e20;
+  const adxOk = A > 25 && pdi > mdi;
+  const breakOk = c >= high20;
+  const rsOk = rs != null && rs > 0.05;
+  const plan: Plan = { direction: "long", entry: c, stop: c - SWING_STOP_ATR * a, target: c + SWING_TARGET_ATR * a, rr: SWING_TARGET_ATR / SWING_STOP_ATR };
+  const components: Record<SwingComponent, number> = {
+    trend: (e20 > e50 ? 15 : 0) + (c > e20 ? 15 : 0),
+    adx: adxOk ? 25 : pdi > mdi ? Math.round(Math.min(A, 25)) : 0,
+    breakout: breakOk ? 20 : Math.round(Math.max(0, 1 - (high20 - c) / (2 * a)) * 10),
+    strength: rsOk ? 15 : rs != null && rs > 0 ? 7 : 0,
+    reward: 10,
+  };
+  const score = Object.values(components).reduce((x, y) => x + y, 0);
+  if (trendOk && adxOk && (breakOk || rsOk)) {
+    const why = breakOk ? "a fresh 20 day high" : `${(rs! * 100).toFixed(0)} points stronger than QQQ over 20 days`;
+    return { action: "BUY", score, components, plan, reason: `Daily uptrend with ADX ${A.toFixed(0)} and ${why}.` };
+  }
+  const reason = !trendOk
+    ? "Daily trend is not up."
+    : !adxOk
+      ? `Trend is weak (ADX ${A.toFixed(0)}).`
+      : "No 20 day high and not outpacing QQQ.";
+  return { action: "WAIT", score, components, plan, reason };
 }

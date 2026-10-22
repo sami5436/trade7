@@ -1,5 +1,5 @@
 import "server-only";
-import { runBacktest, type BacktestParams, type BacktestResult } from "@/lib/backtest";
+import { runBacktest, runSwingBacktest, type BacktestParams, type BacktestResult } from "@/lib/backtest";
 import { addDays, etToday } from "@/lib/time";
 import { getBars, getDailyBars } from "./alpaca";
 import { sql } from "./db";
@@ -7,6 +7,8 @@ import { CORE } from "./scanner";
 import { getSettings } from "./store";
 
 const LOOKBACK_DAYS = 90;
+// Swing mode trades about once a week per name, so it needs a longer window for a useful sample.
+const SWING_LOOKBACK_DAYS = 400;
 
 export const BACKTEST_ASSUMPTIONS = {
   slippageBps: 5,
@@ -16,6 +18,7 @@ export const BACKTEST_ASSUMPTIONS = {
 export async function runAndStoreBacktest(): Promise<BacktestResult & { id: number; createdAt: string; params: BacktestParams }> {
   const settings = await getSettings();
   const today = etToday();
+  if (settings.holdStyle === "swing") return runSwing(settings.riskPct, settings.maxPositions, today);
   const start = `${addDays(today, -LOOKBACK_DAYS)}T00:00:00Z`;
   // Historical consolidated data is free when it ends at least 15 minutes ago.
   const end = new Date(Date.now() - 20 * 60_000).toISOString();
@@ -54,4 +57,29 @@ export async function latestBacktest() {
     equity: row.equity as BacktestResult["equity"],
     trades: row.trades as BacktestResult["trades"],
   };
+}
+
+async function runSwing(riskPct: number, maxPositions: number, today: string) {
+  const symbols = [...CORE, "QQQ"];
+  // Extra history warms up EMA 50 and ADX before the first tested session.
+  const daily = await getDailyBars(symbols, `${addDays(today, -SWING_LOOKBACK_DAYS - 120)}T00:00:00Z`, "sip");
+  const completed = Object.fromEntries(Object.entries(daily).map(([s, d]) => [s, d.filter((x) => x.date < today)]));
+  const params: BacktestParams = {
+    startBalance: 5000,
+    riskPct,
+    maxDailyLossPct: 0,
+    maxPositions,
+    minRR: 2,
+    minScore: 0,
+    exitScore: 0,
+    ...BACKTEST_ASSUMPTIONS,
+  };
+  const core = Object.fromEntries(CORE.map((s) => [s, completed[s] ?? []]));
+  const result = runSwingBacktest(core, completed.QQQ ?? [], { ...params, from: addDays(today, -SWING_LOOKBACK_DAYS) });
+  const trades = result.trades.slice(-300);
+  const stored = { ...params, mode: "swing" };
+  const [row] = await sql()`insert into backtests (params, summary, equity, trades)
+    values (${JSON.stringify(stored)}, ${JSON.stringify(result.summary)}, ${JSON.stringify(result.equity)}, ${JSON.stringify(trades)})
+    returning id, created_at`;
+  return { ...result, trades, params, id: row.id as number, createdAt: new Date(row.created_at).toISOString() };
 }

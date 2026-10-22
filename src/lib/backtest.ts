@@ -1,4 +1,4 @@
-import { buildSeries, dailyAtr, decide, scoreAt, trendAt, type DailyBar, type Direction, type Series } from "./engine";
+import { buildSeries, dailyAtr, decide, scoreAt, swingTrendSignal, trendAt, SWING_MAX_SESSIONS, type DailyBar, type Direction, type Series } from "./engine";
 import type { Bar } from "./indicators";
 import { etParts } from "./time";
 
@@ -248,25 +248,105 @@ export function runBacktest(
     close(pos, last.t, last.c, "close");
   }
 
+  return summarize(trades, equity, params.startBalance, [...sessions], symbols);
+}
+
+/**
+ * Daily swing backtest on shares using swingTrendSignal: decide on each completed session, enter at the
+ * next session open, stop before target inside a day, time exit at the close of the last allowed session.
+ */
+export function runSwingBacktest(
+  daily: Record<string, DailyBar[]>,
+  qqq: DailyBar[],
+  params: Pick<BacktestParams, "startBalance" | "riskPct" | "maxPositions" | "slippageBps"> & { from?: string; to?: string },
+): BacktestResult {
+  const slip = params.slippageBps / 10_000;
+  const symbols = Object.keys(daily);
+  const index: Record<string, Map<string, number>> = {};
+  for (const s of symbols) index[s] = new Map(daily[s].map((d, i) => [d.date, i]));
+  const dates = [...new Set(symbols.flatMap((s) => daily[s].map((d) => d.date)))]
+    .sort()
+    .filter((d) => (!params.from || d >= params.from) && (!params.to || d < params.to));
+
+  interface Pos { symbol: string; entry: number; stop: number; target: number; shares: number; risk: number; k0: number; t: number; score: number }
+  const open = new Map<string, Pos>();
+  let pending: { symbol: string; score: number; stopDist: number; targetDist: number }[] = [];
+  let realized = 0;
+  const trades: BacktestTrade[] = [];
+  const equity: { t: number; equity: number }[] = [];
+  const close = (p: Pos, raw: number, t: number, reason: BacktestTrade["exitReason"]) => {
+    const fill = raw * (1 - slip);
+    const pnl = (fill - p.entry) * p.shares;
+    realized += pnl;
+    trades.push({ symbol: p.symbol, direction: "long", entryTime: p.t, exitTime: t, entry: p.entry, exit: fill, shares: p.shares, pnl, r: pnl / p.risk, exitReason: reason, score: p.score });
+    equity.push({ t, equity: params.startBalance + realized });
+    open.delete(p.symbol);
+  };
+
+  for (const date of dates) {
+    const t = Date.parse(`${date}T20:00:00Z`);
+    for (const c of pending) {
+      if (open.has(c.symbol) || open.size >= params.maxPositions) continue;
+      const k = index[c.symbol].get(date);
+      if (k == null) continue;
+      const fill = daily[c.symbol][k].o * (1 + slip);
+      const eq = params.startBalance + realized;
+      const shares = Math.floor(((eq * params.riskPct) / 100 / c.stopDist) * 1000) / 1000;
+      if (shares <= 0) continue;
+      open.set(c.symbol, { symbol: c.symbol, entry: fill, stop: fill - c.stopDist, target: fill + c.targetDist, shares, risk: c.stopDist * shares, k0: k, t, score: c.score });
+    }
+    pending = [];
+    for (const p of [...open.values()]) {
+      const k = index[p.symbol].get(date);
+      if (k == null) continue;
+      const bar = daily[p.symbol][k];
+      if (bar.l <= p.stop) close(p, Math.min(bar.o, p.stop), t, "stop");
+      else if (bar.h >= p.target) close(p, Math.max(bar.o, p.target), t, "target");
+      else if (k - p.k0 + 1 >= SWING_MAX_SESSIONS) close(p, bar.c, t, "close");
+    }
+    const qk = qqq.findIndex((q) => q.date === date);
+    if (qk < 0) continue;
+    const cands: typeof pending = [];
+    for (const s of symbols) {
+      if (open.has(s)) continue;
+      const k = index[s].get(date);
+      if (k == null) continue;
+      const sig = swingTrendSignal(daily[s].slice(0, k + 1), qqq.slice(0, qk + 1));
+      if (sig.action !== "BUY" || !sig.plan) continue;
+      cands.push({ symbol: s, score: sig.score, stopDist: sig.plan.entry - sig.plan.stop, targetDist: sig.plan.target - sig.plan.entry });
+    }
+    cands.sort((a, b) => b.score - a.score);
+    pending = cands;
+  }
+  for (const p of [...open.values()]) {
+    const d = daily[p.symbol];
+    const last = d[d.length - 1];
+    close(p, last.c, Date.parse(`${last.date}T20:00:00Z`), "close");
+  }
+  return summarize(trades, equity, params.startBalance, dates, symbols);
+}
+
+function summarize(trades: BacktestTrade[], equity: { t: number; equity: number }[], startBalance: number, sessionList: string[], symbols: string[]): BacktestResult {
+  const realized = trades.reduce((a, t) => a + t.pnl, 0);
   const wins = trades.filter((t) => t.pnl > 0);
   const losses = trades.filter((t) => t.pnl <= 0);
   const grossWin = wins.reduce((a, t) => a + t.pnl, 0);
   const grossLoss = -losses.reduce((a, t) => a + t.pnl, 0);
-  let peak = params.startBalance;
+  let peak = startBalance;
   let maxDd = 0;
   for (const p of equity) {
     peak = Math.max(peak, p.equity);
     maxDd = Math.max(maxDd, (peak - p.equity) / peak);
   }
-  const sortedSessions = [...sessions].sort();
-  const endBalance = params.startBalance + realized;
+  const sortedSessions = [...sessionList].sort();
+  const endBalance = startBalance + realized;
   return {
     summary: {
       trades: trades.length,
       wins: wins.length,
       winRate: trades.length ? wins.length / trades.length : 0,
       avgR: trades.length ? trades.reduce((a, t) => a + t.r, 0) / trades.length : 0,
-      totalReturnPct: ((endBalance - params.startBalance) / params.startBalance) * 100,
+      totalReturnPct: ((endBalance - startBalance) / startBalance) * 100,
       endBalance,
       maxDrawdownPct: maxDd * 100,
       profitFactor: grossLoss > 0 ? grossWin / grossLoss : null,

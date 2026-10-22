@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { atr, ema, rsi } from "@/lib/indicators";
-import { buildSeries, decide, scoreAt, trendAt } from "@/lib/engine";
+import { buildSeries, decide, scoreAt, swingTrendSignal, trendAt, SWING_WEIGHTS } from "@/lib/engine";
 import { chooseContract, parseOcc, type OptionQuote } from "@/lib/options";
-import { runBacktest } from "@/lib/backtest";
+import { runBacktest, runSwingBacktest } from "@/lib/backtest";
 import type { Bar } from "@/lib/indicators";
 
 // 2026-10-19 09:30 ET is 13:30 UTC.
@@ -154,5 +154,48 @@ describe("backtest", () => {
     const sum = res.trades.reduce((a, t) => a + t.pnl, 0);
     expect(res.summary.endBalance).toBeCloseTo(5000 + sum);
     for (const t of res.trades) expect(t.exitTime).toBeGreaterThanOrEqual(t.entryTime);
+  });
+});
+
+describe("swing trend", () => {
+  // Business days only; a steady uptrend with a little noise.
+  function dailySeries(n: number, drift: number, start = 100) {
+    const out: { date: string; o: number; h: number; l: number; c: number }[] = [];
+    let p = start;
+    const d = new Date(Date.UTC(2025, 0, 2));
+    while (out.length < n) {
+      if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) {
+        const o = p;
+        const c = p * (1 + drift + Math.sin(out.length / 3) * 0.004);
+        out.push({ date: d.toISOString().slice(0, 10), o, h: Math.max(o, c) * 1.004, l: Math.min(o, c) * 0.996, c });
+        p = c;
+      }
+      d.setUTCDate(d.getUTCDate() + 1);
+    }
+    return out;
+  }
+
+  it("buys a strong daily uptrend with ATR based levels and waits in a downtrend", () => {
+    const qqq = dailySeries(120, 0.0005);
+    const up = swingTrendSignal(dailySeries(120, 0.006), qqq);
+    expect(up.action).toBe("BUY");
+    expect(up.plan!.stop).toBeLessThan(up.plan!.entry);
+    expect(up.plan!.target).toBeGreaterThan(up.plan!.entry);
+    expect(up.plan!.rr).toBeCloseTo(2);
+    expect(Object.values(SWING_WEIGHTS).reduce((a, b) => a + b, 0)).toBe(100);
+    expect(swingTrendSignal(dailySeries(120, -0.006), qqq).action).toBe("WAIT");
+    expect(swingTrendSignal(dailySeries(30, 0.006), qqq).action).toBe("WAIT");
+  });
+
+  it("backtest trades do not change when future sessions are appended", () => {
+    const qqq = dailySeries(260, 0.0005);
+    const sym = dailySeries(260, 0.003);
+    const full = runSwingBacktest({ X: sym }, qqq, { startBalance: 5000, riskPct: 1, maxPositions: 3, slippageBps: 5 });
+    const cut = runSwingBacktest({ X: sym.slice(0, 200) }, qqq.slice(0, 200), { startBalance: 5000, riskPct: 1, maxPositions: 3, slippageBps: 5 });
+    const cutoff = Date.parse(`${sym[190].date}T20:00:00Z`);
+    const a = full.trades.filter((t) => t.exitTime < cutoff);
+    const b = cut.trades.filter((t) => t.exitTime < cutoff);
+    expect(a.length).toBeGreaterThan(0);
+    expect(b).toEqual(a);
   });
 });
