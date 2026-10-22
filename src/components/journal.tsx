@@ -155,7 +155,7 @@ export function Journal() {
           Backtest
         </SectionTitle>
         <p className="text-sm text-white/50">
-          Historical simulation, not live results. Same signals on 5 minute bars for the Magnificent 7, traded as shares, filled at the next bar open with{" "}
+          Historical simulation, not live results. Same signals on 5 minute bars for the watchlist, traded as shares, filled at the next bar open with{" "}
           {bt ? bt.params.slippageBps : 5} bps slippage per side.
         </p>
         {bt ? (

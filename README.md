@@ -1,6 +1,6 @@
 # TRADE7
 
-Minimal momentum trading terminal that paper trades weekly options on the Magnificent 7 automatically.
+Minimal momentum trading terminal that paper trades weekly options on the Magnificent 7, the memory makers (MU, SNDK, WDC, STX) and SpaceX (SPCX) automatically.
 
 Paper trading only. Orders go to an Alpaca paper account. There is no live trading code path.
 

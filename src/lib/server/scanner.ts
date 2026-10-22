@@ -7,7 +7,10 @@ import type { OptionSetup, ScanSummary, Settings, SymbolSignal } from "@/lib/typ
 import { getAsset, getBars, getClock, getDailyBars, getMostActive, getOptionChain, getSnapshots, type Clock, type StockSnapshot } from "./alpaca";
 import { num, numOrNull, sql } from "./db";
 
-export const CORE = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"];
+const MAG7 = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"];
+const MEMORY = ["MU", "SNDK", "WDC", "STX"];
+/** Always scanned and shown. Movers are added on top only when they qualify. */
+export const CORE = [...MAG7, ...MEMORY, "SPCX"];
 const INDEXES = ["SPY", "QQQ"];
 const ENTRY_FROM = 9 * 60 + 45;
 const ENTRY_UNTIL = 15 * 60 + 30;

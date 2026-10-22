@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Minus, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/hooks/use-api";
+import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import { ago, dateTime, money } from "@/lib/format";
 import type { Settings } from "@/lib/types";
 import { Card, SectionTitle } from "./card";
@@ -32,6 +33,7 @@ export function SettingsView() {
   if (!state) return <Skeleton className="h-96 rounded-3xl bg-white/10" />;
   const s = state.settings;
   const equity = state.portfolio.equity;
+  const isDefault = (Object.keys(DEFAULT_SETTINGS) as (keyof typeof DEFAULT_SETTINGS)[]).every((k) => s[k] === DEFAULT_SETTINGS[k]);
 
   async function save(patch: Partial<Settings>) {
     setSaving(true);
@@ -86,7 +88,23 @@ export function SettingsView() {
         </Card>
 
         <Card>
-          <SectionTitle>Risk</SectionTitle>
+          <SectionTitle
+            action={
+              <button
+                type="button"
+                disabled={saving || isDefault}
+                onClick={async () => {
+                  await save(DEFAULT_SETTINGS);
+                  toast.success("Settings reset to defaults.");
+                }}
+                className="h-8 rounded-full border border-white/20 px-3 text-[11px] font-bold tracking-wider transition hover:bg-white hover:text-black disabled:opacity-30"
+              >
+                DEFAULTS
+              </button>
+            }
+          >
+            Risk
+          </SectionTitle>
           <div className="grid gap-1">
             {STEPPERS.map((st) => (
               <Stepper
