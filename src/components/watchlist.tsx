@@ -1,8 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { pct, price } from "@/lib/format";
+import { orderText, pct, price } from "@/lib/format";
 import type { SymbolSignal } from "@/lib/types";
+
+/** What the bot would do with this ticker right now, in plain words. */
+function planText(s: SymbolSignal, held: boolean): string {
+  if (held) return "Holding. The bot manages the exit.";
+  if (s.action === "WAIT") return `No trade. ${s.reason}`;
+  const kind = s.action === "BUY" ? "call" : "put";
+  if (s.option) return `${orderText(s.symbol, s.option)}. Stop ${price(s.stop)}, target ${price(s.target)}.`;
+  const why = s.optionReason ? ` ${s.optionReason}` : "";
+  return `Would buy a ${kind} at ${price(s.entry)}, stop ${price(s.stop)}, target ${price(s.target)}.${why}`;
+}
 import { SignalBadge } from "./signal-badge";
 import { Empty } from "./card";
 
@@ -40,9 +50,7 @@ export function Watchlist({ signals, held = [] }: { signals: SymbolSignal[]; hel
               </div>
               <div className="tabular text-right text-base font-semibold md:text-lg">{s.score}</div>
               <SignalBadge action={s.action} className="w-16" />
-              <div className="col-span-3 truncate text-xs text-white/50 md:col-span-1 md:text-sm">
-                {s.action !== "WAIT" && s.entry != null ? `Entry ${price(s.entry)}  Stop ${price(s.stop)}  Target ${price(s.target)}` : s.reason}
-              </div>
+              <div className="col-span-3 text-xs text-white/55 md:col-span-1 md:text-sm">{planText(s, held.includes(s.symbol))}</div>
             </Link>
           </li>
         ))}
